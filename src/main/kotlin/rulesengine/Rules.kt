@@ -11,9 +11,8 @@ import com.github.h0tk3y.betterParse.grammar.Grammar
 import com.github.h0tk3y.betterParse.grammar.parseToEnd
 import com.github.h0tk3y.betterParse.grammar.parser
 import com.github.h0tk3y.betterParse.parser.Parser
-import rulesengine.RulesGrammar.getValue
-import rulesengine.RulesGrammar.provideDelegate
 import java.io.File
+import java.util.function.Predicate
 
 data class RuleLanguage(
         val tags: List<TagStatement>,
@@ -52,21 +51,21 @@ data class Effect(val name: String)
 object RulesGrammar : Grammar<RuleLanguage>() {
     //    val TRUE by token("true")
 //    val FALSE by token("false")
-    private val NUMBER by token("\\d+") // must be before ID
+    private val NUMBER by token("""\d+""") // must be before ID
 
-    private val PREFIX_ID by token("[$%&§]\\w+") // must be before AND / OR
-    private val ID by token("\\w+")
+    private val PREFIX_ID by token("""[$%&§]\w+""") // must be before AND / OR
+    private val ID by token("""\w+""")
 
-    private val LPAR by token("\\(")
-    private val RPAR by token("\\)")
+    private val LPAR by token("""\(""")
+    private val RPAR by token("""\)""")
     private val NOT by token("!")
     private val AND by token("&")
-    private val OR by token("\\|")
+    private val OR by token("""\|""")
 
 
     private val SEMI by token(";")
 
-    private val WHITESPACE by token("\\s+", ignore = true)
+    private val WHITESPACE by token("""\s+""", ignore = true)
     private val NEWLINE by token("[\r\n]+", ignore = true)
     private val COMMENT by token("#[^\r\n]+", ignore = true)
 
@@ -95,8 +94,8 @@ object RulesGrammar : Grammar<RuleLanguage>() {
 
     // booleanExpr -> effects
     private val ruleStatement: Parser<RuleStatement> =
-            ((NUMBER use { text.toInt() }) * expr * -IMPL * oneOrMore(effect) * optional(COMMENT use {text.substring(1)}))
-                    .map { (w, v, e,c) -> RuleStatement(w, v, e, c ?: "") }
+            ((NUMBER use { text.toInt() }) * expr * -IMPL * oneOrMore(effect) * optional(COMMENT use { text.substring(1) }))
+                    .map { (w, v, e, c) -> RuleStatement(w, v, e, c ?: "") }
 
     // variable = booleanExpr
     private val tagStatement: Parser<TagStatement> =
@@ -137,7 +136,7 @@ fun RuleLanguage.resolveVariables() {
 
     for (rule in rules) {
         val unknownList = mutableListOf<Variable>()
-        if(rule.label.isBlank()) rule.label = "${rule.weight} ${rule.condition}"
+        if (rule.label.isBlank()) rule.label = "${rule.weight} ${rule.condition}"
         rule.condition = rule.condition.resolveVariables(resolvedTags, unknownList, constants, listOf())
         if (unknownList.isNotEmpty()) {
             println("${rule.label} could not find ${unknownList.map { it.name }}")
@@ -194,6 +193,29 @@ fun Expression.resolveVariables(
     }
 }
 
+data class TestContext(
+        val values: MutableMap<String, Boolean> = mutableMapOf()
+)
+
+fun Expression.toPredicate(): Predicate<TestContext> {
+    return when (this) {
+        is Const -> Predicate { ctx ->
+            val result = ctx.values[value] ?: false
+            println("testing value $value = $result")
+            result
+        }
+        is Variable -> Predicate { ctx ->
+            val result = ctx.values[name] ?: false
+            println("testing name $name = $result")
+            result
+        }
+        is Not -> body.toPredicate().negate()
+        is And -> left.toPredicate().and(right.toPredicate())
+        is Or -> left.toPredicate().or(right.toPredicate())
+        is Ref -> value.toPredicate()
+    }
+}
+
 fun main(args: Array<String>) {
     val expr = """
 a = %a & (&b1 | &c1) | &a1 & !&b | !(a1 & &a2)
@@ -227,11 +249,28 @@ cond = !(a1 & &a2) | a
     val parsedCount = parsedString.lines().count()
     val resolvedCount = resolvedString.lines().count()
 
-    println()
-    println("$parsedCount -> $resolvedCount")
-    println()
-    println("labels")
-    parsed.rules.map { it.label }.forEach { println(it) }
+    val predicates = parsed.rules.associateBy( { Pair(it.label, it.effects)}, {it.condition.toPredicate() } )
+
+    val context = TestContext(mutableMapOf(
+            "a" to true,
+            "b" to true,
+            "c" to true,
+            "a1" to false,
+            "a2" to true,
+            "b1" to true,
+            "b2" to true,
+            "c1" to true,
+            "abc" to true
+    ))
+
+    predicates.forEach { pair: Pair<String, List<Effect>>, predicate ->
+        if (predicate.test(context)) {
+            println("${pair.first} == true => ${pair.second.map { it.name }}")
+        } else {
+            println("${pair.first} == false")
+        }
+    }
+
 }
 
 
