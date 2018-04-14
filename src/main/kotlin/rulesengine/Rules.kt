@@ -217,20 +217,9 @@ fun Expression.toPredicate(): Predicate<TestContext> {
 }
 
 fun main(args: Array<String>) {
-    val expr = """
-a = %a & (&b1 | &c1) | &a1 & !&b | !(a1 & &a2)
-false = §a & !§a
-b = %a | false # fake
-c = d & b
-d = abc | b
-cond = !(a1 & &a2) | a
-6 a | b -> asdf
-5 (&b1 | &c1) -> effect1 effect2 #somelabel
-4 !cond -> effect1 effect2
-4 cond -> effect1 effect2
-0 abc -> effect1 effect2
-"""
-    val parsed = RulesGrammar.parseToEnd(expr)
+    val rules = File("simple.rules").readText()
+    
+    val parsed = RulesGrammar.parseToEnd(rules)
 
     val parsedString = parsed.toIndentString()
 
